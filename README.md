@@ -1,8 +1,6 @@
 <p align="center">
-  <!-- ✨ GITHUB ANIMATED TYPING NAME SYSTEM -->
-  <a href="https://git.io/typing-svg">
-    <img src="https://readme-typing-svg.demolab.com?font=monospace&size=30&duration=3500&pause=1000&color=FF0055&center=true&vCenter=true&width=700&height=70&lines=👑+MR+MUNEEB+ALI+👑;🔥+THE+MEGA+BOT+DEVELOPER+🔥" alt="Typing SVG" />
-  </a>
+  <!-- 🔥 100% WORKING GITHUB ANIMATED TEXT SYSTEM -->
+  <img src="https://readme-typing-svg.demolab.com?font=monospace&size=32&duration=3500&pause=1000&color=FF0055&center=true&vCenter=true&width=700&height=70&lines=%F0%9F%91%91+MR+MUNEEB+ALI+%F0%9F%91%91;%F0%9F%94%A5+DEVELOPER+KING+%F0%9F%94%A5" alt="Muneeb Ali Animation" />
 </p>
 
 <p align="center">
@@ -67,17 +65,6 @@ The core file delivery structure preserves system-state directories while deploy
 | 📄 `package.json` | 📦 **Dependencies** | Tracks engine runtime, versioning tags, and required npm libraries. |
 | 📁 `session/` | 🔒 *Preserved (Ignored)* | Strictly isolated to prevent user logouts during live hot-reloads. |
 | 📁 `database/` | 💾 *Preserved (Ignored)* | Completely secure; keeps user settings and group rules persistent. |
-
----
-
-## ⚙️ How to Deploy an Update (Admin Workflow)
-
-Whenever you design a new feature or code a fresh command, follow this streamlined pipeline:
-
-1. **Write the Code:** Implement the new command logic inside your local directory or via Replit Agent.
-2. **Set Version Tag:** Open `version.json` in this repository and bump the release tag (e.g., change `"version": "1.0.0"` to `"1.0.1"`).
-3. **Write Changelog:** Mention your new feature under the `"news"` key in `version.json`.
-4. **Push Changes:** Commit and save. All connected client bots will automatically sniff the new release via the raw network array and prompt their owners to type `.update start`.
 
 ---
 
