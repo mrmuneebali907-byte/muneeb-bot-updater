@@ -1,12 +1,12 @@
 <p align="center">
-  <!-- 🔥 STYLISH ANIMATED NAME LOADING SYSTEM -->
-  <marquee behavior="scroll" direction="left" scrollamount="6" loop="infinite">
-    <font size="6" color="#FF0055" face="monospace"><b>👑 MR MUNEEB ALI — THE MEGA BOT DEVELOPER 👑</b></font>
-  </marquee>
+  <!-- ✨ GITHUB ANIMATED TYPING NAME SYSTEM -->
+  <a href="https://git.io/typing-svg">
+    <img src="https://readme-typing-svg.demolab.com?font=monospace&size=30&duration=3500&pause=1000&color=FF0055&center=true&vCenter=true&width=700&height=70&lines=👑+MR+MUNEEB+ALI+👑;🔥+THE+MEGA+BOT+DEVELOPER+🔥" alt="Typing SVG" />
+  </a>
 </p>
 
 <p align="center">
-  <!-- 📸 YOUR CINEMATIC PORTRAIT IMAGE HOLDER -->
+  <!-- 📸 YOUR PORTRAIT IMAGE PLACEHOLDER (ali-.jpg) -->
   <img src="ali-.jpg" alt="Muneeb Ali Portrait" width="90%" style="border-radius: 15px; border: 3px solid #FF0055; box-shadow: 0px 4px 15px rgba(0,0,0,0.5);">
 </p>
 
@@ -16,10 +16,12 @@
   <img src="https://img.shields.io/badge/Platform-Node.js%20%7C%20Replit-orange.svg?style=for-the-badge" alt="Platform">
 </p>
 
+Welcome to the **Official Update and Code Distribution Center** for Muneeb's WhatsApp Automation & Group Management Bot ecosystem. This repository handles secure source code deliveries, modular feature patches, and automated version-control system-wide.
+
 ---
 
 ## 🌐 Quick Connect & Links
-Neeche diye gaye buttons par click karke aap mujhse direct raabta kar sakte hain aur tools acquire kar sakte hain:
+Neeche diye gaye buttons par click karke aap mujhse direct raabta kar sakte hain:
 
 <p align="center">
   <!-- 💬 WHATSAPP CONTACT BUTTON -->
@@ -56,6 +58,8 @@ Neeche diye gaye buttons par click karke aap mujhse direct raabta kar sakte hain
 
 ## 🏗️ Repository Architecture
 
+The core file delivery structure preserves system-state directories while deploying system updates:
+
 | Directory/File | Distribution Status | Description |
 | :--- | :--- | :--- |
 | 📁 `commands/` | 🚀 **Live Update** | Houses all group management and protection command files. |
@@ -63,6 +67,17 @@ Neeche diye gaye buttons par click karke aap mujhse direct raabta kar sakte hain
 | 📄 `package.json` | 📦 **Dependencies** | Tracks engine runtime, versioning tags, and required npm libraries. |
 | 📁 `session/` | 🔒 *Preserved (Ignored)* | Strictly isolated to prevent user logouts during live hot-reloads. |
 | 📁 `database/` | 💾 *Preserved (Ignored)* | Completely secure; keeps user settings and group rules persistent. |
+
+---
+
+## ⚙️ How to Deploy an Update (Admin Workflow)
+
+Whenever you design a new feature or code a fresh command, follow this streamlined pipeline:
+
+1. **Write the Code:** Implement the new command logic inside your local directory or via Replit Agent.
+2. **Set Version Tag:** Open `version.json` in this repository and bump the release tag (e.g., change `"version": "1.0.0"` to `"1.0.1"`).
+3. **Write Changelog:** Mention your new feature under the `"news"` key in `version.json`.
+4. **Push Changes:** Commit and save. All connected client bots will automatically sniff the new release via the raw network array and prompt their owners to type `.update start`.
 
 ---
 
