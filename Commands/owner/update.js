@@ -13,6 +13,67 @@
 const { exec }  = require('child_process');
 const fs        = require('fs');
 const path      = require('path');
+
+// Case-insensitive path lookup (GitHub folder "Commands" vs manifest "commands" on Linux)
+function _ciResolve(root, rel) {
+  let cur = root;
+  for (const seg of rel.split(/[\\/]/).filter(Boolean)) {
+    let hit = null;
+    try {
+      const names = fs.readdirSync(cur);
+      hit = names.includes(seg) ? seg : names.find(n => n.toLowerCase() === seg.toLowerCase());
+    } catch (_) { return null; }
+    if (!hit) return null;
+    cur = path.join(cur, hit);
+  }
+  return cur;
+}
+
+// ── Safety: backup → verify → rollback (one update touches EVERY bot, so it must never leave broken files) ──
+let _journal = null;                       // { dir, items: [{ dest, backup|null }] }
+let _updating = false;                     // only one update at a time (all bots share the same files)
+let _lastOk = 0;                           // time of last successful update
+const COOLDOWN_MS = 5 * 60 * 1000;
+
+function _stage(dest) {
+  if (!_journal) return;
+  const it = { dest, backup: null };
+  if (fs.existsSync(dest)) {
+    it.backup = path.join(_journal.dir, String(_journal.items.length));
+    fs.mkdirSync(_journal.dir, { recursive: true });
+    fs.copyFileSync(dest, it.backup);
+  }
+  _journal.items.push(it);
+}
+function _rollback() {
+  if (!_journal) return 0;
+  let n = 0;
+  for (const it of _journal.items.reverse()) {
+    try {
+      if (it.backup) fs.copyFileSync(it.backup, it.dest); else fs.unlinkSync(it.dest);
+      n++;
+    } catch (_) {}
+  }
+  return n;
+}
+function _verify(files) {
+  const vm = require('vm'), Module = require('module');
+  const bad = [];
+  for (const f of files) {
+    const full = path.join(process.cwd(), f);
+    try {
+      if (f.endsWith('.js'))        new vm.Script(Module.wrap(fs.readFileSync(full, 'utf8')), { filename: f });
+      else if (f.endsWith('.json')) JSON.parse(fs.readFileSync(full, 'utf8'));
+    } catch (e) { bad.push(`${f} (${String(e.message).split('\n')[0]})`); }
+  }
+  return bad;
+}
+function semverNewer(r, l) {
+  const p = v => String(v || '0').replace(/[^0-9.]/g, '').split('.').map(n => parseInt(n, 10) || 0);
+  const a = p(r), b = p(l);
+  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return false;
+}
 const https     = require('https');
 const http      = require('http');
 const config    = require('../../config');
@@ -115,6 +176,7 @@ function copyRecursive(src, dest, preserve, relPath = '', copied = []) {
     if (stat.isDirectory()) {
       copyRecursive(srcPath, destPath, new Set(), path.join(relPath, entry), copied);
     } else {
+      _stage(destPath);
       fs.copyFileSync(srcPath, destPath);
       copied.push(path.join(relPath, entry).replace(/\\/g, '/'));
     }
@@ -159,6 +221,7 @@ function rescueSecrets() {
 }
 
 async function updateViaZip(zipUrl, statusFn) {
+  _journal = { dir: path.join(process.cwd(), 'tmp', `update_backup_${Date.now()}`), items: [] };
   const cwd    = process.cwd();
   const tmpDir = path.join(cwd, 'tmp');
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -180,30 +243,52 @@ async function updateViaZip(zipUrl, statusFn) {
 
   rescueSecrets();
   await statusFn('📋 Copying new files (preserving your data)…');
-  // If the update package carries `update-manifest.json`, ONLY the files listed there are copied
-  // (everything else on the server is left exactly as it is). Without a manifest: classic full copy.
-  let copied;
-  const manifestPath = path.join(srcRoot, 'update-manifest.json');
-  if (fs.existsSync(manifestPath)) {
-    const list = (JSON.parse(fs.readFileSync(manifestPath, 'utf8')).files || []);
-    copied = [];
-    for (const rel of list) {
-      const clean = path.normalize(String(rel)).replace(/^([/\\]|\.\.[/\\])+/, '');
-      const top = clean.split(/[/\\]/)[0];
-      if (!clean || clean.includes('..') || PRESERVE.has(top) || PRESERVE.has(path.basename(clean))) continue;
-      const from = path.join(srcRoot, clean);
-      if (!fs.existsSync(from) || !fs.lstatSync(from).isFile()) continue;
-      fs.mkdirSync(path.dirname(path.join(cwd, clean)), { recursive: true });
-      fs.copyFileSync(from, path.join(cwd, clean));
-      copied.push(clean.replace(/\\/g, '/'));
+  // AUTO mode — no manifest to maintain. Whatever the repo holds in commands/, utils/, Panel/ (any letter case)
+  // plus handler.js, aiEngine.js, package.json is installed. New command file in the repo = new command here.
+  const ROOT_FILES = new Set(['handler.js', 'aiEngine.js', 'package.json']);
+  const CODE_DIRS  = { commands: 'commands', utils: 'utils', panel: 'Panel' };
+  const copied = [];
+  copied.created = [];
+  const serverDir = (want) => {
+    try { const hit = fs.readdirSync(cwd).find(n => n.toLowerCase() === want.toLowerCase() && fs.lstatSync(path.join(cwd, n)).isDirectory()); if (hit) return hit; } catch (_) {}
+    return want;
+  };
+  const place = (from, relDest) => {
+    const dest = path.join(cwd, relDest);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const existed = fs.existsSync(dest);
+    _stage(dest);
+    fs.copyFileSync(from, dest);
+    const rel = relDest.replace(/\\/g, '/');
+    copied.push(rel);
+    if (!existed) copied.created.push(rel);
+  };
+  const walk = (srcDir, relDir) => {
+    for (const name of fs.readdirSync(srcDir)) {
+      if (name.startsWith('.')) continue;
+      const full = path.join(srcDir, name);
+      const st = fs.lstatSync(full);
+      if (st.isDirectory()) { walk(full, path.join(relDir, name)); continue; }
+      if (!st.isFile() || st.size === 0 || !/\.(js|json)$/i.test(name)) continue;
+      place(full, path.join(relDir, name));
     }
-  } else {
-    copied = copyRecursive(srcRoot, cwd, PRESERVE);
+  };
+  for (const name of fs.readdirSync(srcRoot)) {
+    const full = path.join(srcRoot, name);
+    const st = fs.lstatSync(full);
+    if (st.isFile() && ROOT_FILES.has(name)) place(full, name);
+    else if (st.isDirectory() && CODE_DIRS[name.toLowerCase()]) walk(full, serverDir(CODE_DIRS[name.toLowerCase()]));
   }
 
   try { fs.rmSync(extractTo, { recursive: true, force: true }); } catch {}
   try { fs.unlinkSync(zipPath); } catch {}
 
+  if (!copied.length) throw new Error('Update package khaali / galat hai — kuch bhi nahi badla.');
+  const bad = _verify(copied);
+  if (bad.length) {
+    _rollback();
+    throw new Error('Nayi files mein error mili, isliye purani files wapas laga di (bot safe hai):\n• ' + bad.slice(0, 5).join('\n• '));
+  }
   return copied;
 }
 
@@ -213,12 +298,20 @@ module.exports = {
   aliases     : ['upgrade', 'botupdate'],
   category    : 'owner',
   description : 'Bot ko latest version par update karo (owner only)',
-  usage       : '.update [zip_url]',
+  usage       : '.update   (Main Developer: .update force)',
   ownerOnly   : true,
 
   async execute(sock, msg, args, extra) {
     const chatId = msg.key.remoteJid;
-    const zipUrl = (args[0] || GITHUB_ZIP_URL).trim();   // (a custom zip_url is still accepted, but never echoed back)
+    const isSuper = !!(extra.isMainDeveloper || extra.isSuperAdmin);
+    const force   = isSuper && (args[0] || '').toLowerCase() === 'force';
+    // custom zip_url = arbitrary code → only the Main Developer may use it
+    const customUrl = isSuper && args[0] && /^https?:\/\//i.test(args[0]) ? args[0] : null;
+    const zipUrl = (customUrl || GITHUB_ZIP_URL).trim();
+
+    if (_updating) return extra.reply('⏳ Update pehle se chal raha hai (saare bots ek hi code use karte hain). Thodi der ruko.');
+    if (!force && Date.now() - _lastOk < COOLDOWN_MS)
+      return extra.reply('✅ Abhi hi update ho chuka hai — saare bots ko naya code mil chuka hai. 5 minute baad dobara check karna.');
 
     const statusMsg = await extra.reply('🔄 *Starting update…*');
     const statusKey = statusMsg?.key;
@@ -233,12 +326,19 @@ module.exports = {
     try {
       let localVer  = '1.0.0';
       let remoteVer = null;
+      let remoteInfo = null;
       try { localVer = require('../../package.json').version; } catch (_) {}
       try {
         const remote = await fetchJson(VERSION_URL);
+        remoteInfo = remote || null;
         remoteVer = remote?.version;
       } catch (_) {}
 
+      if (remoteVer && !force && !customUrl && !semverNewer(remoteVer, localVer)) {
+        return await statusFn(`✅ *Bot already latest hai* (v${localVer}).\nNaya version aane par yahin se update kar lena.`);
+      }
+
+      _updating = true;
       if (remoteVer) {
         await statusFn(
           `📦 *Version check*\n• Local  : v${localVer}\n• Remote : v${remoteVer}\n\n⬇️ Downloading…`
@@ -246,6 +346,15 @@ module.exports = {
       }
 
       const copied = await updateViaZip(zipUrl, statusFn);
+
+      // Version sync: package.json always follows version.json (nobody edits it by hand)
+      if (remoteVer) {
+        try {
+          const pj = path.join(process.cwd(), 'package.json');
+          const j = JSON.parse(fs.readFileSync(pj, 'utf8'));
+          if (j.version !== remoteVer) { j.version = String(remoteVer); fs.writeFileSync(pj, JSON.stringify(j, null, 2) + '\n'); }
+        } catch (_) {}
+      }
 
       // Install any new npm packages from the updated package.json
       try {
@@ -269,6 +378,7 @@ module.exports = {
         console.log('[Update] ✅ Hot-reload complete');
       } catch (hrErr) {
         reloadError = hrErr.message;
+        try { _rollback(); require('../../handler').hotReloadCommands(); reloadError += ' (purani files wapas laga di)'; } catch (_) {}
         console.warn('[Update] ⚠️ Hot-reload error:', hrErr.message);
       }
 
@@ -290,9 +400,32 @@ module.exports = {
         newVer = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).version || newVer;
       } catch (_) {}
 
-      const newCmdLine = newCmds.length
-        ? `\n🆕 New commands: *${newCmds.join(', ')}*`
+      // New commands: what version.json announces + whatever really appeared after the reload
+      const pfx = config.prefix || '.';
+      const cmdMap = (() => { try { return loadCommands(); } catch (_) { return new Map(); } })();
+      const announced = (remoteInfo && Array.isArray(remoteInfo.newCommands)) ? remoteInfo.newCommands : [];
+      const lines = new Map();
+      const add = (name, desc) => {
+        name = String(name || '').replace(/^[.!/#]/, '').trim();
+        if (!name || lines.has(name)) return;
+        const c = cmdMap.get(name);
+        lines.set(name, `• *${pfx}${name}*${(desc || (c && c.description)) ? ' — ' + (desc || c.description) : ''}`);
+      };
+      for (const a of announced) typeof a === 'string' ? add(a.split(/\s+[—-]\s+/)[0], a.split(/\s+[—-]\s+/).slice(1).join(' — ')) : add(a && a.name, a && (a.desc || a.description));
+      for (const k of newCmds) add(k);
+      for (const rel of (copied.created || [])) {            // brand-new command FILES (auto-detected)
+        if (!/^commands[\\/]/i.test(rel)) continue;
+        try {
+          const abs = path.join(process.cwd(), rel);
+          delete require.cache[require.resolve(abs)];
+          const m = require(abs);
+          if (m && m.name) add(m.name, m.description);
+        } catch (_) { add(path.basename(rel, '.js')); }
+      }
+      const newCmdLine = lines.size
+        ? `\n\n🆕 *Naye commands aa gaye — ab use karo:*\n${[...lines.values()].join('\n')}`
         : '';
+      const logLine = (remoteInfo && remoteInfo.changelog) ? `\n\n📋 *Kya naya hai:*\n${remoteInfo.changelog}` : '';
       const reloadLine = reloadError
         ? `\n⚠️ Reload warning: ${reloadError} — run .restart for full effect`
         : `\n⚡ *${namesAfter.size} commands active (hot-reloaded — NO restart needed)*`;
@@ -302,17 +435,24 @@ module.exports = {
         `📁 Files updated : *${copied.length}*\n` +
         (newVer ? `📦 Version       : *v${newVer}*\n` : '') +
         newCmdLine +
+        logLine +
         reloadLine +
         `\n\n🔒 Safe rahe: sessions, data, config.js\n` +
         `✅ *Bot is still running — naye commands ABHI kaam kar rahe hain!*`;
 
+      _lastOk = Date.now();
       await statusFn(summary);
       // NO process.exit — bot stays running with hot-reloaded commands.
       // Core-file changes (handler.js etc.) need a manual .restart
 
     } catch (error) {
       console.error('[Update] Failed:', error);
+      try { _rollback(); } catch (_) {}
       await statusFn(`❌ *Update failed:*\n${src.scrub(error.message)}\n\n_Thodi der baad dobara try karo._`);
+    } finally {
+      _updating = false;
+      try { if (_journal) fs.rmSync(_journal.dir, { recursive: true, force: true }); } catch (_) {}
+      _journal = null;
     }
   },
 };
