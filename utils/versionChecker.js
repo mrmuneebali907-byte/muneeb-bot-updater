@@ -36,7 +36,7 @@ function fetchJson(url) {
     }, (res) => {
       let data = '';
       res.on('data', c => data += c);
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Invalid JSON from version endpoint')); } });
+      res.on('end', () => { try { resolve(JSON.parse(String(data).replace(/^\uFEFF/, "").replace(/,(\s*[}\]])/g, "$1"))); } catch (e) { reject(new Error('Invalid JSON from version endpoint')); } });
     }).on('error', reject).on('timeout', function () { this.destroy(new Error('Timeout')); });
   });
 }

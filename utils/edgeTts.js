@@ -15,6 +15,41 @@ const HOST    = process.env.EDGE_TTS_HOST || 'wss://speech.platform.bing.com';
 const BASE    = '/consumer/speech/synthesize/readaloud/edge/v1';
 let skewSec = 0;     // server time − local time
 
+
+// ── optional route through the local SOCKS5 proxy (Cloudflare WARP) — only used when the direct connection fails ──
+function socks5Tunnel(proxyUrl, host, port, timeoutMs = 8000) {
+  const net = require('net'), tls = require('tls');
+  return new Promise((resolve, reject) => {
+    let u; try { u = new URL(proxyUrl); } catch (e) { return reject(new Error('bad proxy url')); }
+    const sock = net.connect({ host: u.hostname, port: parseInt(u.port, 10) || 1080 });
+    let buf = Buffer.alloc(0), step = 0, done = false;
+    const fail = (e) => { if (done) return; done = true; clearTimeout(t); try { sock.destroy(); } catch (_) {} reject(e instanceof Error ? e : new Error(String(e))); };
+    const t = setTimeout(() => fail(new Error('socks5 timeout')), timeoutMs);
+    sock.on('error', fail);
+    sock.on('connect', () => sock.write(Buffer.from([5, 1, 0])));
+    sock.on('data', (d) => {
+      if (done) return;
+      buf = Buffer.concat([buf, d]);
+      if (step === 0) {
+        if (buf.length < 2) return;
+        if (buf[0] !== 5 || buf[1] !== 0) return fail(new Error('socks5 auth refused'));
+        buf = buf.slice(2); step = 1;
+        const h = Buffer.from(host, 'ascii');
+        sock.write(Buffer.concat([Buffer.from([5, 1, 0, 3, h.length]), h, Buffer.from([port >> 8, port & 255])]));
+      }
+      if (step === 1) {
+        if (buf.length < 5) return;
+        if (buf[1] !== 0) return fail(new Error('socks5 connect failed (code ' + buf[1] + ')'));
+        const need = 4 + (buf[3] === 1 ? 4 : buf[3] === 4 ? 16 : 1 + buf[4]) + 2;
+        if (buf.length < need) return;
+        done = true; clearTimeout(t);
+        sock.removeAllListeners('data'); sock.removeAllListeners('error');
+        resolve(tls.connect({ socket: sock, servername: host }));
+      }
+    });
+  });
+}
+
 function secMsGec() {
   let ticks = Math.floor(Date.now() / 1000 + skewSec) + 11644473600;
   ticks -= ticks % 300;
@@ -25,7 +60,7 @@ const uuid = () => crypto.randomUUID().replace(/-/g, '');
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 const ts = () => new Date().toUTCString().replace('GMT', 'GMT+0000 (Coordinated Universal Time)');
 
-function once(voice, text, opts = {}) {
+function once(voice, text, opts = {}, agent = null) {
   return new Promise((resolve, reject) => {
     if (!WS) return reject(new Error('ws module missing'));
     const url = `${HOST}${BASE}?TrustedClientToken=${TOKEN}&Sec-MS-GEC=${secMsGec()}&Sec-MS-GEC-Version=1-${CHROME}&ConnectionId=${uuid()}`;
@@ -37,6 +72,7 @@ function once(voice, text, opts = {}) {
         'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME.split('.')[0]}.0.0.0 Safari/537.36 Edg/${CHROME.split('.')[0]}.0.0.0`,
       },
       handshakeTimeout: 10000,
+      ...(agent ? { agent } : {}),
     });
     const chunks = []; let done = false;
     const finish = (err, val) => { if (done) return; done = true; clearTimeout(timer); try { ws.close(); } catch (_) {} err ? reject(err) : resolve(val); };
@@ -71,7 +107,21 @@ async function synth(voice, text, opts = {}) {
     try { const b = await once(voice, text, opts); if (b && b.length > 256) return b; throw new Error('Edge TTS empty audio'); }
     catch (e) { last = e; if (e.status !== 403) break; }
   }
+  // Direct connection failed (some hosting IPs are blocked by Microsoft) → retry through the local WARP proxy if it is running
+  try {
+    const proxy = require('./warp').getProxy && require('./warp').getProxy();
+    if (proxy) {
+      const h = new URL(HOST.replace(/^wss/, 'https')).hostname;
+      const https = require('https');
+      const tun = await socks5Tunnel(proxy, h, 443);
+      const agent = new https.Agent({ keepAlive: false });
+      agent.createConnection = () => tun;
+      const b = await once(voice, text, opts, agent);
+      if (b && b.length > 256) { console.log('[TTS] edgeTts OK via WARP'); return b; }
+      throw new Error('Edge TTS empty audio (WARP)');
+    }
+  } catch (e2) { console.log('[TTS] edgeTts via WARP:', e2.message); }
   throw last;
 }
 
-module.exports = { synth, _secMsGec: secMsGec };
+module.exports = { synth, _secMsGec: secMsGec, _socks5Tunnel: socks5Tunnel };

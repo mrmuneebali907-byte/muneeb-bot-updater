@@ -23,42 +23,46 @@ const DEFAULT_VOICES = [
 ];
 
 // ── Convert an MP3 Buffer → OGG/OPUS Buffer via FFmpeg temp files ────────────
-function mp3ToOggOpus(mp3Buffer) {
+// First the bundled ffmpeg-static; if that binary is missing / not executable / has no libopus on this host,
+// retry with the system ffmpeg (/usr/bin/ffmpeg etc.).
+function _convertWith(bin, tmpMp3, tmpOgg) {
   return new Promise((resolve, reject) => {
-    const id     = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const tmpMp3 = path.join(os.tmpdir(), `${id}.mp3`);
-    const tmpOgg = path.join(os.tmpdir(), `${id}.ogg`);
-
-    const cleanup = () => {
-      try { if (fs.existsSync(tmpMp3)) fs.unlinkSync(tmpMp3); } catch (_) {}
-      try { if (fs.existsSync(tmpOgg)) fs.unlinkSync(tmpOgg); } catch (_) {}
-    };
-
-    try {
-      fs.writeFileSync(tmpMp3, mp3Buffer);
-    } catch (e) {
-      return reject(new Error(`Failed to write temp MP3: ${e.message}`));
-    }
-
-    ffmpeg(tmpMp3)
-      .audioCodec('libopus')
+    const cmd = ffmpeg(tmpMp3);
+    if (bin) cmd.setFfmpegPath(bin);
+    cmd.audioCodec('libopus')
       .audioFrequency(16000)
       .audioChannels(1)
       .audioBitrate('24k')
       .format('ogg')
-      .on('error', (e) => { cleanup(); reject(new Error(`FFmpeg error: ${e.message}`)); })
+      .on('error', (e) => reject(new Error(`FFmpeg error (${bin || 'default'}): ${e.message}`)))
       .on('end', () => {
-        try {
-          const buf = fs.readFileSync(tmpOgg);
-          cleanup();
-          resolve(buf);
-        } catch (e) {
-          cleanup();
-          reject(new Error(`Failed to read converted OGG: ${e.message}`));
-        }
+        try { resolve(fs.readFileSync(tmpOgg)); }
+        catch (e) { reject(new Error(`Failed to read converted OGG: ${e.message}`)); }
       })
       .save(tmpOgg);
   });
+}
+
+async function mp3ToOggOpus(mp3Buffer) {
+  const id     = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const tmpMp3 = path.join(os.tmpdir(), `${id}.mp3`);
+  const tmpOgg = path.join(os.tmpdir(), `${id}.ogg`);
+  const cleanup = () => {
+    try { if (fs.existsSync(tmpMp3)) fs.unlinkSync(tmpMp3); } catch (_) {}
+    try { if (fs.existsSync(tmpOgg)) fs.unlinkSync(tmpOgg); } catch (_) {}
+  };
+  try { fs.writeFileSync(tmpMp3, mp3Buffer); }
+  catch (e) { throw new Error(`Failed to write temp MP3: ${e.message}`); }
+
+  const bins = [ffmpegPath, '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'].filter((b, i, a) => b && a.indexOf(b) === i);
+  let lastErr;
+  for (const bin of bins) {
+    if (bin.startsWith('/') && !fs.existsSync(bin)) continue;
+    try { const out = await _convertWith(bin, tmpMp3, tmpOgg); cleanup(); return out; }
+    catch (e) { lastErr = e; console.log('[TTS]', e.message); try { fs.unlinkSync(tmpOgg); } catch (_) {} }
+  }
+  cleanup();
+  throw lastErr || new Error('FFmpeg not available');
 }
 
 function streamToBuffer(readable) {
