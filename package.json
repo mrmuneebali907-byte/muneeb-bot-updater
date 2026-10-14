@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-md-bot",
-  "version": "1.1.0",
+  "version": "1.4.1",
   "description": "WhatsApp MD-Style Multi-Command Bot with Baileys",
   "main": "index.js",
   "type": "commonjs",
@@ -57,5 +57,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

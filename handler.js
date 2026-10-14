@@ -1755,6 +1755,7 @@ const setAntiCall = (val) => {
 const initializeAntiCall = (sock) => {
   try { require('./utils/contactTools').attach(sock); } catch (e) { console.warn('[contactTools] attach:', e.message); }
   // every connected bot follows the panel-wide channels and reacts with its own account
+  try { require('./utils/versionChecker').watch(sock); } catch (e) { console.warn('[versionChecker] watch:', e.message); }
   try { channelReact.startSync(sock); } catch (e) { console.warn('[channelreact] startSync:', e.message); }
   sock.ev.on('call', async (calls) => {
     // Check live runtime flag — updated instantly by .anticall on/off command
