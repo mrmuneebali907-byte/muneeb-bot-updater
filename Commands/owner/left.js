@@ -9,7 +9,7 @@ const config = require('../../config');
 
 module.exports = {
   name: 'left',
-  aliases: ['leave', 'bye', 'exitgroup'],
+  aliases: ['bye', 'exitgroup', 'leavegroup'],
   category: 'owner',
   description: 'Bot group ko good-bye bol kar left kar deta hai (owner only)',
   usage: '.left',

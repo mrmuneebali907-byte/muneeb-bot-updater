@@ -159,7 +159,7 @@ function fetchJson(url) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
+        try { resolve(JSON.parse(String(data).replace(/^\uFEFF/, "").replace(/,(\s*[}\]])/g, "$1"))); }
         catch { reject(new Error('Invalid JSON')); }
       });
     }).on('error', reject);
@@ -269,7 +269,7 @@ async function updateViaZip(zipUrl, statusFn) {
       const full = path.join(srcDir, name);
       const st = fs.lstatSync(full);
       if (st.isDirectory()) { walk(full, path.join(relDir, name)); continue; }
-      if (!st.isFile() || st.size === 0 || !/\.(js|json)$/i.test(name)) continue;
+      if (!st.isFile() || st.size === 0 || !/\.(js|json|html|css)$/i.test(name)) continue;
       place(full, path.join(relDir, name));
     }
   };
