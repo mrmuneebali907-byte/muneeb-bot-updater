@@ -54,6 +54,8 @@ try {
   }
 }
 console.log(`[ytdlp] binary: ${YTDLP_PATH} | ffmpeg: ${FFMPEG_PATH || 'NOT FOUND — merging disabled'}`);
+// heal a missing ffmpeg binary (partial npm install) + print the [media] diagnostic line
+try { require('./mediaFix').init(); } catch (_) {}
 console.log(`[ytdlp] cookies: ${fs.existsSync(COOKIES_PATH) ? 'loaded' : 'not found (direct YouTube may be blocked)'}`);
 
 // yt-dlp needs a JS runtime to solve YouTube's challenges. Node is already here,
@@ -74,6 +76,8 @@ function ensureBinary() {
       'yt-dlp binary missing.\nRun: mkdir -p bin && curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o bin/yt-dlp && chmod +x bin/yt-dlp'
     );
   }
+  // zip/upload tools often drop the executable bit → EACCES; fix it every time (cheap, harmless)
+  try { fs.chmodSync(YTDLP_PATH, 0o755); } catch (_) {}
 }
 
 // ── Base args used in every call ─────────────────────────────────────────────
