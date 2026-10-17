@@ -38,6 +38,17 @@ const rand  = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const withTimeout = (p, ms, label) => Promise.race([
   p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${label || 'timeout'} (${ms / 1000}s)`)), ms)),
 ]);
+const WRAPPERS = ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage', 'editedMessage', 'deviceSentMessage'];
+const META_KEYS = ['messageContextInfo', 'senderKeyDistributionMessage', 'protocolMessage'];
+function unwrap(m) {
+  for (let i = 0; m && typeof m === 'object' && i < 6; i++) {
+    const w = WRAPPERS.find((k) => m[k] && m[k].message);
+    if (!w) break;
+    m = m[w].message;
+  }
+  return m || null;
+}
 const botKey = (sock) => String(sock.user?.id || 'bot').split(':')[0].split('@')[0];
 
 async function download(qmsg, type) {
@@ -63,7 +74,13 @@ function toVN(buffer) {
 async function buildInner(sock, content) {
   const { backgroundColor } = content;
   const clean = { ...content }; delete clean.backgroundColor;
-  return generateWAMessageContent(clean, { upload: sock.waUploadToServer, backgroundColor: backgroundColor || PURPLE });
+  const inner = await generateWAMessageContent(clean, { upload: sock.waUploadToServer, backgroundColor: backgroundColor || PURPLE });
+  // images need thumbnail + width/height or WhatsApp silently drops a group status (hosts without working sharp)
+  try {
+    const r = await require('../../utils/mediaFix').fixImageInner(inner, clean.image);
+    if (r !== 'n/a') console.log(`[AllGroupStatus] image thumb=${r}`);
+  } catch (_) {}
+  return inner;
 }
 
 /** Wrap the already-uploaded inner message for one group and relay it. */
@@ -98,10 +115,11 @@ async function execute(sock, msg, args, extra) {
 
   // ── what to post ───────────────────────────────────────────────────────────
   const caption = args.join(' ').trim();
-  const ctx = msg.message?.extendedTextMessage?.contextInfo
-           || msg.message?.imageMessage?.contextInfo
-           || msg.message?.videoMessage?.contextInfo;
-  const quoted = ctx?.quotedMessage || null;
+  const _own = unwrap(msg.message) || {};
+  const ctx = _own.extendedTextMessage?.contextInfo
+           || _own.imageMessage?.contextInfo
+           || _own.videoMessage?.contextInfo;
+  const quoted = unwrap(ctx?.quotedMessage) || null;
 
   if (!quoted && !caption) {
     return reply(
@@ -126,7 +144,7 @@ async function execute(sock, msg, args, extra) {
     if (!quoted) {
       content = { text: caption, backgroundColor: PURPLE };
     } else {
-      const type = Object.keys(quoted)[0] || '';
+      const type = Object.keys(quoted).find((k) => !META_KEYS.includes(k) && quoted[k]) || '';
       if (/image/i.test(type))        content = { image: await download(quoted, 'image'), caption };
       else if (/sticker/i.test(type)) content = { image: await download(quoted, 'sticker'), caption };
       else if (/video/i.test(type))   content = { video: await download(quoted, 'video'), caption };
