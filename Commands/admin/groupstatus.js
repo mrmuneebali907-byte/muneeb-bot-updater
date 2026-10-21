@@ -74,6 +74,7 @@ module.exports = {
 
         try {
           await groupStatus(sock, from, {
+            _notify: extra.reply,
             text: caption,
             backgroundColor: PURPLE_COLOR,
           });
@@ -103,7 +104,8 @@ module.exports = {
         if (!finalText) return extra.reply('❌ Is message mein text nahi hai.');
         await extra.reply('⏳ Posting text group status...');
         try {
-          await groupStatus(sock, from, { text: finalText, backgroundColor: PURPLE_COLOR });
+          await groupStatus(sock, from, {
+            _notify: extra.reply, text: finalText, backgroundColor: PURPLE_COLOR });
           return extra.reply('✅ Text group status posted!');
         } catch (e) {
           console.error('groupstatus text error:', e);
@@ -133,6 +135,7 @@ module.exports = {
 
         try {
           await groupStatus(sock, from, {
+            _notify: extra.reply,
             image: buf,
             caption: caption || '',
           });
@@ -156,6 +159,7 @@ module.exports = {
 
         try {
           await groupStatus(sock, from, {
+            _notify: extra.reply,
             video: buf,
             caption: caption || '',
           });
@@ -193,6 +197,7 @@ module.exports = {
 
         try {
           await groupStatus(sock, from, {
+            _notify: extra.reply,
             audio: vn,
             mimetype: 'audio/ogg; codecs=opus',
             ptt: true,
@@ -226,8 +231,9 @@ async function downloadMedia(msg, type) {
 }
 
 async function groupStatus(sock, jid, content) {
-  const { backgroundColor } = content;
+  const { backgroundColor, _notify } = content;
   delete content.backgroundColor;
+  delete content._notify;
 
   const imgBuf = content.image;
   const inside = await generateWAMessageContent(content, {
@@ -255,8 +261,38 @@ async function groupStatus(sock, jid, content) {
   );
 
   await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+  watchAck(sock, msg.key.id, _notify, jid);
   console.log(`[groupstatus] relayed kind=${Object.keys(inside).find((k) => !/context/i.test(k)) || '?'} thumb=${thumb} group=${String(jid).split('@')[0]}`);
   return msg;
+}
+
+/**
+ * WhatsApp's server answers every message with an ack. A REJECTED group status (account / group not allowed,
+ * restricted account, bad stanza…) only shows up there — relayMessage itself still "succeeds".
+ * Baileys turns an error ack into a messages.update with status 0 (ERROR) and the error code.
+ */
+function watchAck(sock, id, notify, jid) {
+  try {
+    if (!sock?.ev?.on || !id) return;
+    const grp = String(jid).split('@')[0];
+    const h = (updates) => {
+      for (const u of updates || []) {
+        if (u?.key?.id !== id) continue;
+        const st = u.update?.status;
+        if (st === 0) {
+          const code = (u.update.messageStubParameters || [])[0] || '?';
+          console.log(`[groupstatus] ❌ server ne REJECT kiya  error=${code}  group=${grp}`);
+          if (typeof notify === 'function') {
+            Promise.resolve(notify(`⚠️ WhatsApp server ne group status reject kar diya (error ${code}).\nYe bot ka code nahi, is number / group par WhatsApp ki pabandi hai.`)).catch(() => {});
+          }
+        } else if (st >= 2) {
+          console.log(`[groupstatus] ✅ server ack/delivery status=${st}  group=${grp}`);
+        }
+      }
+    };
+    sock.ev.on('messages.update', h);
+    setTimeout(() => { try { sock.ev.off('messages.update', h); } catch (_) {} }, 30000).unref?.();
+  } catch (_) {}
 }
 
 function toVN(buffer) {
