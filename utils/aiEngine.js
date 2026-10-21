@@ -129,13 +129,14 @@ async function _run(o) {
   const t0 = Date.now(); const ms = () => Date.now() - t0;
   const out = (text, api) => { console.log(`[AI-Engine] ✅ ${api} → ${ms()}ms`); return { text, api, ms: ms() }; };
 
-  for (const p of KEYED) {
+  const order = o.prefer ? [...KEYED].sort((a, b) => (b.name === o.prefer) - (a.name === o.prefer)) : KEYED;
+  for (const p of order) {
     for (const model of p.models) {
       for (const key of keys.usable(p.name, model)) {
         if (ms() >= CASCADE_MS) { console.error('[AI-Engine] time budget exceeded'); return null; }
         try {
           const raw = await p.call(key, model, o);
-          const text = o.json ? String(raw || '').trim() : clean(raw);
+          const text = (o.json || o.raw) ? String(raw || '').trim() : clean(raw);
           if (text) { keys.ok(key, model); return out(text, `${p.name}/${model}`); }
           keys.report(key, model, 400);
         } catch (e) {
@@ -150,7 +151,7 @@ async function _run(o) {
     if (ms() >= CASCADE_MS) break;
     try {
       const raw = await f.call(o);
-      const text = o.json ? String(raw || '').trim() : clean(raw);
+      const text = (o.json || o.raw) ? String(raw || '').trim() : clean(raw);
       if (text) return out(text, f.name);
     } catch (e) { console.warn(`[AI-Engine] ❌ ${f.name}: ${e.message}`); }
   }
@@ -167,6 +168,8 @@ function askAI(opts) {
     user: String(opts.user || ''),
     history: Array.isArray(opts.history) ? opts.history : [],
     json: !!opts.json,
+    raw: !!opts.raw,                       // skip chat-style cleaning (used for code generation)
+    prefer: opts.prefer || null,           // provider to try first, e.g. 'gemini'
     maxTokens: opts.maxTokens || 600,
     temperature: opts.temperature ?? (opts.json ? 0.1 : 0.8),
   };

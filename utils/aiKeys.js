@@ -14,9 +14,10 @@ const path = require('path');
 const FILE = path.join(__dirname, '..', 'data', 'aiKeys.json');
 
 // Built-in keys (owner's current ones). Old expired keys were removed.
-const DEFAULTS = {
-  // keys are NOT stored in code (the update repo is public) — use `.aikey add <provider> <key>` or env vars
-  groq: [], gemini: [], mistral: [],
+const DEFAULTS = {   // public repo: no keys here — real keys live in data/aiKeys.json (never touched by updates)
+  groq:    [],
+  gemini:  [],
+  mistral: [],
 };
 const PROVIDERS = ['groq', 'gemini', 'mistral', 'openrouter', 'cerebras'];
 

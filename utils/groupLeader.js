@@ -35,8 +35,8 @@ function findMe(participants, s) {
   return participants.find(p => [p.id, p.lid, p.phoneNumber, p.jid].filter(Boolean).some(x => nums.has(digits(x)))) || null;
 }
 
-/** true when THIS sock is the one that must act in `groupId` */
-function isLeader(sock, groupId, meta) {
+/** true when THIS sock is the one that must act in `groupId`  (accept(sock) → optional extra filter for the OTHER bots) */
+function isLeader(sock, groupId, meta, accept) {
   try {
     if (!sock?.user?.id || !groupId?.endsWith('@g.us')) return true;
     register(sock);
@@ -48,6 +48,7 @@ function isLeader(sock, groupId, meta) {
     for (const s of [...bots]) {
       if (!alive(s)) { if (s !== sock && s.ws && (s.ws.isClosed === true)) bots.delete(s); continue; }
       if (s !== sock && !eligible(s)) continue;
+      if (s !== sock && typeof accept === 'function') { try { if (!accept(s)) continue; } catch (_) {} }   // e.g. bots whose prefix matches the typed command
       const p = findMe(participants, s);
       if (!p) continue;
       byNum.set(digits(s.user.id), { sock: s, admin: p.admin === 'admin' || p.admin === 'superadmin' });

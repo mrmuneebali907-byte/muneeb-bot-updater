@@ -85,6 +85,26 @@ function releaseTags() {
   return tags;
 }
 
+/** GitHub blocked? The npm registry works wherever `npm install` works: @ffmpeg-installer/<platform>-<arch> ships the binary. */
+function npmFfmpeg(target, opts = {}) {
+  try {
+    const pkg = opts.pkg || `@ffmpeg-installer/${process.platform}-${process.arch}`;
+    const os = require('os');
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ffnpm-'));
+    const env = Object.assign({}, process.env, { npm_config_cache: path.join(work, 'cache'), npm_config_audit: 'false', npm_config_fund: 'false' });
+    try {
+      const out = String(execFileSync('npm', ['pack', pkg, '--silent'], { cwd: work, env, timeout: 120000 })).trim().split('\n').pop();
+      execFileSync('tar', ['-xzf', path.join(work, out), '-C', work], { timeout: 60000 });
+      const bin = path.join(work, 'package', 'ffmpeg');
+      if (!fs.existsSync(bin) || fs.statSync(bin).size < 5e6) return false;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      try { fs.unlinkSync(target); } catch (_) {}
+      fs.copyFileSync(bin, target); fs.chmodSync(target, 0o755);
+      return works(target);
+    } finally { try { fs.rmSync(work, { recursive: true, force: true }); } catch (_) {} }
+  } catch (_) { return false; }
+}
+
 /** Make sure a working ffmpeg exists where the commands look for it. opts only for tests. */
 async function ensureFfmpeg(opts = {}) {
   if (process.platform === 'win32') return null;
@@ -105,6 +125,11 @@ async function ensureFfmpeg(opts = {}) {
       if (opts.baseUrl) break;
     }
   }
+  if (!good && !opts.baseUrl) {
+    const target = st || path.join(BIN, 'ffmpeg');
+    console.log('[media] GitHub se nahi mila — npm registry se try kar raha hoon…');
+    if (npmFfmpeg(target)) { good = target; console.log('[media] ✅ ffmpeg npm se mil gaya'); }
+  }
   if (!good) { console.log('[media] ⚠️ ffmpeg available nahi — sticker/video/audio commands kaam nahi karengi'); return null; }
 
   // every command that just calls "ffmpeg" (Baileys video thumbnails, shell helpers) finds it through PATH
@@ -117,6 +142,37 @@ async function ensureFfmpeg(opts = {}) {
 }
 
 function ffmpegPath() { return _ffmpeg || process.env.FFMPEG_PATH || staticPath() || 'ffmpeg'; }
+
+
+/** seconds this host's clock is ahead (+) / behind (-) of WhatsApp's servers (Date header); null if unreachable */
+function clockSkew() {
+  return new Promise((resolve) => {
+    try {
+      const t0 = Date.now();
+      const req = https.request('https://web.whatsapp.com/', { method: 'HEAD', timeout: 7000, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        res.resume();
+        const d = Date.parse(res.headers.date || '');
+        resolve(Number.isFinite(d) ? Math.round(((t0 + Date.now()) / 2 - d) / 1000) : null);
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.end();
+    } catch (_) { resolve(null); }
+  });
+}
+/** public IP / country / network of this host, e.g. "1.2.3.4 DE AS24940 Hetzner" */
+function ipInfo() {
+  return new Promise((resolve) => {
+    try {
+      const req = https.get('https://ipinfo.io/json', { timeout: 7000, headers: { 'User-Agent': 'curl/8' } }, (res) => {
+        let d = ''; res.on('data', (c) => { d += c; if (d.length > 4000) req.destroy(); });
+        res.on('end', () => { try { const j = JSON.parse(d); resolve(`${j.ip} ${j.country || ''} ${String(j.org || '').slice(0, 40)}`.trim()); } catch (_) { resolve('n/a'); } });
+      });
+      req.on('error', () => resolve('n/a'));
+      req.on('timeout', () => { req.destroy(); resolve('n/a'); });
+    } catch (_) { resolve('n/a'); }
+  });
+}
 
 /** boot: heal ffmpeg + print one diagnostic line (never throws, never blocks start-up) */
 function init() {
@@ -131,6 +187,11 @@ function init() {
     let bv = '?';
     try { bv = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules', '@whiskeysockets', 'baileys', 'package.json'), 'utf8')).version; } catch (_) {}
     console.log(`[media] ffmpeg=${ff ? ff + (ver ? ' v' + ver : '') : 'MISSING'} | sharp=${sharpState} | baileys=${bv}`);
+    // host facts that can make WhatsApp treat two otherwise identical servers differently
+    try {
+      const [skew, ip] = await Promise.all([clockSkew(), ipInfo()]);
+      console.log(`[media] node=${process.version} | clock=${skew == null ? 'n/a' : (skew >= 0 ? '+' : '') + skew + 's vs WhatsApp'} | tz=${process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone} | ip=${ip}`);
+    } catch (_) {}
   })().catch(() => {});
   return _initP;
 }
@@ -207,4 +268,4 @@ async function fixImageInner(inner, buf) {
   return 'added';
 }
 
-module.exports = { init, ensureFfmpeg, ffmpegPath, imageSize, thumbFor, fixImageInner };
+module.exports = { _npmFfmpeg: npmFfmpeg, init, ensureFfmpeg, ffmpegPath, imageSize, thumbFor, fixImageInner };

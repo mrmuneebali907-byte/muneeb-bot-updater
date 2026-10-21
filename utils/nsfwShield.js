@@ -26,13 +26,13 @@ const writeJson = (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: t
 
 // ── API credentials (set by the owner with .nsfw api <user> <secret>) ────────────
 // Owner's own Sightengine key (used only when no data/nsfwApi.json / env var is set)
-const DEFAULT_API = { user: '255440166', secret: 'SShqxsUqYs9LAjLXp6Psi3QmPGFHzfGE' };
+const DEFAULT_API = { user: '', secret: '' };   // public repo: key lives in data/nsfwApi.json (or .nsfw api <user> <secret>)
 function getApi() {
   const j = readJson(API_FILE, null);
   if (j?.user && j?.secret) return j;
   const u = process.env.SIGHTENGINE_USER, s = process.env.SIGHTENGINE_SECRET;
   if (u && s) return { user: u, secret: s };
-  return DEFAULT_API;   // built-in key: works even if data/nsfwApi.json is missing
+  return DEFAULT_API.user && DEFAULT_API.secret ? DEFAULT_API : null;   // not configured -> no image judgement
 }
 function getApiRaw() { return readJson(API_FILE, null) || DEFAULT_API; }
 /** setApi(null) removes it; setApi(user) keeps the stored secret; setApi(user, secret) replaces both */
