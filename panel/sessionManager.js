@@ -16,7 +16,7 @@ const QRCode = require('qrcode');
 const config = require('../config');
 const handler = require('../handler');
 
-const MAX_SESSIONS = Math.max(1, parseInt(process.env.MAX_BOTS, 10) || 8);   // OptikLink 1 GB: 8 bots is the safe limit (env MAX_BOTS overrides, e.g. on Railway)
+const MAX_SESSIONS = Math.max(1, parseInt(process.env.MAX_BOTS, 10) || (() => { try { return parseInt(require('../config').maxBots, 10); } catch (_) { return 0; } })() || 8);   // OptikLink 1 GB: 8 bots is the safe limit (env MAX_BOTS overrides, e.g. on Railway)
 const SESSIONS_DIR = path.join(__dirname, '..', 'sessions');
 
 // ── Cached Baileys version (fetch once, reuse for all sessions) ─────────────
