@@ -29,7 +29,7 @@ const _strictGuard = require('./utils/strictGuard');
 const _antiGM = require('./utils/antiGroupMention');
 const _antiUB = require('./utils/antiUserbot');
 const _nsfwShield = require('./utils/nsfwShield');
-const { isAutoStatusEnabled, isStatusReactEnabled } = require('./utils/autostatusConfig');
+const { isAutoStatusEnabled, isStatusReactEnabled, pickStatusEmoji } = require('./utils/autostatusConfig');
 const channelReact = require('./utils/channelReact');
 const {
   getPending: getAntifakePending,
@@ -537,6 +537,14 @@ const getBotPrefix = (sock) => {
 };
 
 const _botScope = require('./utils/botScope');
+// one claim per (group, message): returns true only for the FIRST bot that claims it
+const _cmdClaims = new Map();
+const _claimCmd = (key) => {
+  if (_cmdClaims.has(key)) return false;
+  _cmdClaims.set(key, Date.now());
+  if (_cmdClaims.size > 800) { const cut = Date.now() - 120000; for (const [k, t] of _cmdClaims) { if (t < cut) _cmdClaims.delete(k); } }
+  return true;
+};
 const handleMessage = (sock, msg) => _botScope.run(sock, () => _prefixALS.run({ prefix: getBotPrefix(sock) }, () => _handleMessageInner(sock, msg)));
 const _handleMessageInner = async (sock, msg) => {
   _leader.register(sock);
@@ -686,7 +694,7 @@ const _handleMessageInner = async (sock, msg) => {
       if (isStatusReactEnabled(_statusBotId)) {
         try {
           await sock.sendMessage('status@broadcast', {
-            react: { text: '👀', key: msg.key }
+            react: { text: pickStatusEmoji(_statusBotId), key: msg.key }
           }, { statusJidList: [statusSender] });
         } catch (_) {}
       }
@@ -1282,38 +1290,11 @@ const _handleMessageInner = async (sock, msg) => {
       if (isGroup && !msg.key.fromMe) {
         try {
           const _sn = sender.split('@')[0];
-          const emojiMap = {
-            '🥰': `@${_sn} Emoji bhej ke pyar jata rahe ho, par akal se bhi kabhi kaam le liya karo. 🙃`,
-            '😍': `@${_sn} Itna kya ghoor rahe ho screen ko, group mein aur bhi log hain. 😑`,
-            '😂': `@${_sn} Apni hi baat pe khud hi hass rahe ho, koi aur to hasa nahi. 😐`,
-            '🤣': `@${_sn} Itna zor se hasne se pehle content dekh lo, hasi ka koi maza nahi. 🙄`,
-            '❤️': `@${_sn} Dil bhej rahe ho, par pehle apni chat history check kar lo. 😬`,
-            '❤️‍🔥': `@${_sn} Aag lagi hui hai kya? Fire emoji se zyada garmi to tumhari baaton mein nahi. 😒`,
-            '🔥': `@${_sn} Fire bola, par yahan sirf tumhara data burn ho raha hai. 🔥😂`,
-            '⚡': `@${_sn} Speed dikha rahe ho, jawab dene mein wahi speed kahan gayab ho jaati hai. ⚡`,
-            '😈': `@${_sn} Shaitan mode dikha rahe ho, asal mein sabse dara hua tum hi ho. 😏`,
-            '👑': `@${_sn} King ban rahe ho emoji se, taaj ke bina bhi bhikari lag rahe ho. 👑`,
-            '💀': `@${_sn} Marne wali baat kaunsi thi, tumhari soch hi pehle se marri hui hai. 💀`,
-            '🤔': `@${_sn} Itni soch rahe ho, aur nikal kya raha hai — kuch nahi. 🧠`,
-            '😎': `@${_sn} Swag dikha rahe ho, par confidence sirf emoji mein hi hai. 😎`,
-            '🥶': `@${_sn} Thand lag rahi hai kya, ya tumhari baaton mein hamesha se garmi nahi thi. ❄️`,
-            '😭': `@${_sn} Ro mat, itni si baat pe? Group chhod ke jaana ho to bata dena. 😑`,
-            '🥺': `@${_sn} Yeh cute face lagane se kaam nahi banega, seedhi baat karo. 🙄`,
-            '😡': `@${_sn} Gussa aaya? Achha hai, kam se kam kuch to feel kar rahe ho. 😤`,
-            '🤬': `@${_sn} Gaali dene se pehle apni galti maan lo, faayda hoga. 🙃`,
-            '🙌': `@${_sn} Taali bajane se pehle kuch karke to dikhao. 👏`,
-            '👏': `@${_sn} Taali toh bohot bajate ho, kaam ka naam nahi sunte. 👏`,
-            '✨': `@${_sn} Chamak dikha rahe ho, par asliyat sabko pata hai. ✨`,
-            '💎': `@${_sn} Diamond bol rahe ho khud ko, koyla bhi tumse zyada chamakta hai. 💎`,
-            '🚀': `@${_sn} Rocket bane phirte ho, zameen pe hi theek se chal nahi paate. 🚀`,
-            '😴': `@${_sn} So gaye kya dimaag se, jaagte hue bhi so rahe lagte ho. 😴`,
-            '🤯': `@${_sn} Dimaag phatne ki baat kahan thi, khaali dimaag mein kya phatega. 🤯`,
-            '😏': `@${_sn} Yeh muskurahat chupa nahi payegi, sabko pata hai asliyat. 😏`,
-          };
           const tb = body.trim();
           // Emoji reply fires for BOTH plain emoji sends AND emoji-in-reply — GROUP ONLY
-          if (Object.prototype.hasOwnProperty.call(emojiMap, tb)) {
-            await sock.sendMessage(from, { text: emojiMap[tb], mentions: [sender] }, { quoted: msg });
+          const _roast = require('./utils/emojiRoast').replyFor(from, tb, _sn);   // per-group on/off: .emojiroast
+          if (_roast) {
+            await sock.sendMessage(from, { text: _roast, mentions: [sender] }, { quoted: msg });
             return;
           }
         } catch (_) {}
@@ -1386,8 +1367,18 @@ const _handleMessageInner = async (sock, msg) => {
     if (command.modOnly && !isMod(sender) && !isOwner(sender)) return sock.sendMessage(from, { text: '🔒 This command is only for moderators!' }, { quoted: msg });
     if (command.groupOnly && !isGroup)  return sock.sendMessage(from, { text: config.messages.groupOnly }, { quoted: msg });
     if (command.privateOnly && isGroup) return sock.sendMessage(from, { text: config.messages.privateOnly }, { quoted: msg });
-    // Admin-type group commands: only the leader bot (the admin one) answers — the other bots stay silent
-    if (isGroup && (command.adminOnly || command.botAdminNeeded) && !_isLeader) return;
+    // Admin-type group commands: only the leader bot (the admin one) answers — the other bots stay silent.
+    // Safety net: if the leader never answered (different prefix, self-mode, lagging socket …) the next bot takes over
+    // after 2.5 s — so "only for group admins" / "Bot needs to be admin" is ALWAYS shown, exactly once.
+    if (isGroup && (command.adminOnly || command.botAdminNeeded)) {
+      const _ck = from + '|' + (msg.key.id || '');
+      const _cmdLeader = _leader.isLeader(sock, from, groupMetadata, (s) => String(body).startsWith(getBotPrefix(s)));
+      if (_cmdLeader) { _claimCmd(_ck); }
+      else {
+        await new Promise((r) => setTimeout(r, 2500));
+        if (!_claimCmd(_ck)) return;          // the leader (or another bot) already handled it
+      }
+    }
     if (command.adminOnly && !(await isAdmin(sock, sender, from, groupMetadata)) && !isOwner(sender))
       return sock.sendMessage(from, { text: config.messages.adminOnly }, { quoted: msg });
     if (command.botAdminNeeded && !(await isBotAdmin(sock, from, groupMetadata)))
@@ -1418,7 +1409,16 @@ const _handleMessageInner = async (sock, msg) => {
     console.error('[Handler]', error);
     if (error.message?.includes('rate-overlimit')) return;
     try {
-      await sock.sendMessage(msg.key.remoteJid, { text: `${config.messages.error}\n\n${error.message}` }, { quoted: msg });
+      // Jarvis monitor: log (redacted), auto-repair agent commands, and never show internals to normal users
+      let _userText = `${config.messages.error}\n\nThodi der baad dobara try karo.`;   // no internals for users (monitor, when present, adds owner contact)
+      try {
+        const _jm = require('./utils/jarvisMonitor');
+        const _isDev = (() => { try { const s = msg.key.participant || msg.key.remoteJid; const n = normalizeJidWithLid(s).split('@')[0].split(':')[0]; return n === (config.mainDeveloper || '923196615238'); } catch (_) { return false; } })();
+        const _cmdName = (() => { try { const b = msg.message?.conversation || msg.message?.extendedTextMessage?.text || ''; return b.trim().slice(1).split(/\s+/)[0].toLowerCase(); } catch (_) { return ''; } })();
+        const _safe = _jm.onCommandError({ commandName: _cmdName, error, sock, senderIsOwner: _isDev });
+        if (_safe) _userText = _safe;
+      } catch (_) {}
+      await sock.sendMessage(msg.key.remoteJid, { text: _userText }, { quoted: msg });
     } catch (e) { if (!e.message?.includes('rate-overlimit')) console.error('[Handler send-error]', e); }
   }
 };

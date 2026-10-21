@@ -26,9 +26,14 @@
 
 const fetch = require('node-fetch');
 
-// ── API Keys — read from utils/aiKeys.js (data/aiKeys.json, env vars or `.aikey add`) — never hard-coded ──
-const _keyStore = require('./utils/aiKeys');
-const _key = (prov, i = 0) => (_keyStore.all(prov)[i] || '');
+// ── API Keys ── (public repo: no keys here. The live keys are in data/aiKeys.json on each server — see utils/aiKeys.js)
+const GROQ_KEY_1       = '';
+const GROQ_KEY_2       = '';
+const OPENROUTER_KEY   = '';
+const GEMINI_KEY_1     = '';
+const GEMINI_KEY_2     = '';
+const CEREBRAS_KEY     = '';
+const MISTRAL_KEY      = '';
 
 // ── Models ────────────────────────────────────────────────────────────────────
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
@@ -176,7 +181,7 @@ async function callOpenRouter(systemPrompt, userMessage, history) {
       method : 'POST',
       headers: {
         'Content-Type' : 'application/json',
-        'Authorization': `Bearer ${_key('openrouter')}`,
+        'Authorization': `Bearer ${OPENROUTER_KEY}`,
         'HTTP-Referer' : 'https://github.com/MrMuneebAliBot',
         'X-Title'      : 'Mr.Muneeb Ali Bot',
       },
@@ -238,7 +243,7 @@ async function callCerebras(systemPrompt, userMessage, history) {
       method : 'POST',
       headers: {
         'Content-Type' : 'application/json',
-        'Authorization': `Bearer ${_key('cerebras')}`,
+        'Authorization': `Bearer ${CEREBRAS_KEY}`,
       },
       body: JSON.stringify({ model: CEREBRAS_MODEL, messages, max_tokens: 600, temperature: 0.8 }),
     },
@@ -265,7 +270,7 @@ async function callMistral(systemPrompt, userMessage, history) {
       method : 'POST',
       headers: {
         'Content-Type' : 'application/json',
-        'Authorization': `Bearer ${_key('mistral')}`,
+        'Authorization': `Bearer ${MISTRAL_KEY}`,
       },
       body: JSON.stringify({ model: MISTRAL_MODEL, messages, max_tokens: 600, temperature: 0.8 }),
     },
@@ -394,13 +399,13 @@ async function _runAIRequest(systemPrompt, userMessage, history) {
   const ms = () => Date.now() - start;
 
   const apis = [
-    { name: 'groq-1',       fn: () => callGroq(_key('groq', 0), 1, systemPrompt, userMessage, history) },
-    { name: 'groq-2',       fn: () => callGroq(_key('groq', 1), 2, systemPrompt, userMessage, history) },
+    { name: 'groq-1',       fn: () => callGroq(GROQ_KEY_1, 1, systemPrompt, userMessage, history) },
+    { name: 'groq-2',       fn: () => callGroq(GROQ_KEY_2, 2, systemPrompt, userMessage, history) },
     { name: 'cerebras',     fn: () => callCerebras(systemPrompt, userMessage, history) },
     { name: 'openrouter',   fn: () => callOpenRouter(systemPrompt, userMessage, history) },
     { name: 'mistral',      fn: () => callMistral(systemPrompt, userMessage, history) },
-    { name: 'gemini-1',     fn: () => callGemini(_key('gemini', 0), 1, systemPrompt, userMessage, history) },
-    { name: 'gemini-2',     fn: () => callGemini(_key('gemini', 1), 2, systemPrompt, userMessage, history) },
+    { name: 'gemini-1',     fn: () => callGemini(GEMINI_KEY_1, 1, systemPrompt, userMessage, history) },
+    { name: 'gemini-2',     fn: () => callGemini(GEMINI_KEY_2, 2, systemPrompt, userMessage, history) },
     { name: 'llm7',         fn: () => callLlm7(systemPrompt, userMessage, history) },
     { name: 'poll-post',    fn: () => callPollinationsPost(systemPrompt, userMessage, history) },
     { name: 'poll-get',     fn: () => callPollinationsGet(systemPrompt, userMessage) },
