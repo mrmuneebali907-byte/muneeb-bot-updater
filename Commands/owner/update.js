@@ -91,6 +91,21 @@ const PRESERVE = new Set([
 
 const MAX_REDIRECTS = 8;
 
+// ── dependency handling ───────────────────────────────────────────────────────────────────────────────
+// `npm install` INSIDE the running bot needs ~200 MB extra RAM. On a 512 MB host that kills the process half-way and leaves
+// node_modules broken ("Cannot find module 'thread-stream'"). So the update never runs npm itself: it only notes that new
+// packages are needed, and startup.js installs them on the next (re)start, while the bot is not running.
+const PENDING_FLAG = () => path.join(process.cwd(), 'tmp', 'pending-install');
+function readDeps() {
+  try { return JSON.stringify(JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).dependencies || {}); }
+  catch (_) { return ''; }
+}
+function markPendingInstall() {
+  try { fs.mkdirSync(path.dirname(PENDING_FLAG()), { recursive: true }); fs.writeFileSync(PENDING_FLAG(), String(Date.now())); return true; }
+  catch (_) { return false; }
+}
+
+
 function run(cmd, opts = {}) {
   return new Promise((resolve, reject) => {
     exec(cmd, { windowsHide: true, timeout: 120_000, ...opts }, (err, stdout, stderr) => {
@@ -294,6 +309,7 @@ async function updateViaZip(zipUrl, statusFn) {
 
 module.exports = {
   _rescueSecrets: rescueSecrets,   // (exported for tests)
+  _readDeps: readDeps, _markPendingInstall: markPendingInstall,
   name        : 'update',
   aliases     : ['upgrade', 'botupdate'],
   category    : 'owner',
@@ -345,6 +361,7 @@ module.exports = {
         );
       }
 
+      const depsBefore = readDeps();
       const copied = await updateViaZip(zipUrl, statusFn);
 
       // Version sync: package.json always follows version.json (nobody edits it by hand)
@@ -356,12 +373,10 @@ module.exports = {
         } catch (_) {}
       }
 
-      // Install any new npm packages from the updated package.json
-      try {
-        await statusFn('📦 Installing dependencies…');
-        await run('npm install --production --no-audit --no-fund', { cwd: process.cwd() });
-      } catch (npmErr) {
-        console.warn('[Update] npm install warning:', npmErr.message);
+      // New npm packages? Only note it — startup.js installs them on the next restart (never inside the running bot).
+      let depsLine = '';
+      if (readDeps() !== depsBefore && markPendingInstall()) {
+        depsLine = '\n\n📦 *Naye packages chahiye* — *.restart* karo, restart par apne aap install ho jayenge (is dauran bot 2-6 min busy rahega).';
       }
 
       // ── Hot-reload: runs BEFORE success message so new commands are live ────
@@ -436,6 +451,7 @@ module.exports = {
         (newVer ? `📦 Version       : *v${newVer}*\n` : '') +
         newCmdLine +
         logLine +
+        depsLine +
         reloadLine +
         `\n\n🔒 Safe rahe: sessions, data, config.js\n` +
         `✅ *Bot is still running — naye commands ABHI kaam kar rahe hain!*`;
