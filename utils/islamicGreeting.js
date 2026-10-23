@@ -87,8 +87,20 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
  * @param {string} from    — chat JID (group or private)
  * @returns {Promise<boolean>}  true = handled (caller should return early)
  */
+/** switches: .greeting off  (this group / this DM)   |   .greeting off all  (every chat of this bot) */
+function isEnabled(sock, from) {
+  try {
+    const db = require('../database');
+    const botId = String(sock?.user?.id || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '') || 'default';
+    if (db.getBotSetting(botId, 'islamicGreetingAll', true) === false) return false;
+    if (String(from).endsWith('@g.us')) return db.getGroupSettings(from).islamicGreeting !== false;
+    return db.getBotSetting(botId, 'islamicGreetingDM', true) !== false;
+  } catch (_) { return true; }
+}
+
 async function handleGreeting(sock, msg, body, sender, from) {
   if (!body) return false;
+  if (!isEnabled(sock, from)) return false;
   const now  = Date.now();
   const text = body.trim();
 
@@ -119,4 +131,4 @@ async function handleGreeting(sock, msg, body, sender, from) {
   return false;
 }
 
-module.exports = { handleGreeting };
+module.exports = { handleGreeting, isEnabled };
