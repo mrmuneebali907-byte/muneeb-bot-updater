@@ -19,14 +19,8 @@ const ytdlp = require('./ytdlp');
 const FFMPEG = () => ytdlp.FFMPEG_PATH || 'ffmpeg';
 
 function run(args, { timeoutMs = 600000, capture = true } = {}) {
-  return new Promise((resolve) => {
-    let err = '';
-    const p = spawn(FFMPEG(), args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) {} resolve({ code: -9, err: err + '\ntimeout' }); }, timeoutMs);
-    p.stderr.on('data', d => { if (capture) { err += d.toString(); if (err.length > 60000) err = err.slice(-30000); } });
-    p.on('error', e => { clearTimeout(t); resolve({ code: -1, err: String(e.message) }); });
-    p.on('close', code => { clearTimeout(t); resolve({ code, err }); });
-  });
+  // shared runner: agar ek ffmpeg binary crash kare to doosra try hota hai (utils/ffmpegBin.js)
+  return require('./ffmpegBin').runAny(args, { timeoutMs, capture }).then(r => ({ code: r.code, err: r.err }));
 }
 
 /** codec info from `ffmpeg -i` (works without ffprobe) */

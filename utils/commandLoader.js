@@ -20,7 +20,7 @@ const UTILS_PATH = __dirname;
 const REFRESH_UTILS = new Set([
   'animeImg', 'freeDl', 'ytdlp', 'mediaDownloader', 'helpers', 'converter', 'sticker', 'stickerConverter',
   'exif', 'imageGen', 'vision', 'waVideo', 'webp2mp4', 'time',
-  'ttsEngine', 'sttEngine', 'edgeTts', 'voiceRouter', 'punish', 'autoReact', 'emojiRoast',
+  'ttsEngine', 'sttEngine', 'edgeTts', 'voiceRouter', 'punish', 'autoReact', 'emojiRoast', 'netAxios',
 ]);
 let _lastRefresh = { utils: [] };
 
