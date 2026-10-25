@@ -10,9 +10,11 @@
  *     baaki sab par sirf tez delete — kick/warn/notice bar-bar nahi.
  *  4. deleteQueued(): deletes ek line mein, thodi gap se — taaki WhatsApp rate-limit na kare aur koi chhoote nahi.
  */
-const SKIP = new Set(['jpegThumbnail', 'thumbnail', 'mediaKey', 'fileSha256', 'fileEncSha256', 'directPath', 'streamingSidecar', 'scansSidecar',
+const SKIP = new Set(['url', 'directPath', 'jpegThumbnail', 'thumbnail', 'mediaKey', 'fileSha256', 'fileEncSha256', 'streamingSidecar', 'scansSidecar',
   'midQualityFileSha256', 'highQualityThumbnail', 'thumbnailDirectPath', 'thumbnailSha256', 'thumbnailEncSha256', 'quotedMessage', 'messageContextInfo',
-  'senderKeyDistributionMessage', 'mediaKeyTimestamp', 'waveform']);
+  'senderKeyDistributionMessage', 'mediaKeyTimestamp', 'waveform', 'staticUrl', 'animatedUrl', 'firstFrameSidecar', 'firstFrameLength', 'firstFrameThumbnail',
+  'videoUrl', 'imageUrl', 'thumbnailUrl', 'pngThumbnail', 'fileLength', 'stickerSentTs', 'ptvThumbnail']);
+// har media message mein ye asli WhatsApp CDN ka link/path hota hai (mmg.whatsapp.net) — kabhi group-invite link nahi hota, isliye hamesha skip
 
 function extractText(message) {
   const out = [];
