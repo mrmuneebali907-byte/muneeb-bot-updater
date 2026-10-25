@@ -100,21 +100,38 @@ const R = {
   '😞': ['{n} Udaas? Chai pi lo, sab theek ho jayega. ☕'],
 };
 
-const norm = (e) => String(e || '').trim().replace(/️/g, '');
+// variation selector + skin tone are ignored, so the plain / light / dark versions of an emoji all hit the same roast
+const norm = (e) => String(e || '').trim().replace(/[️\u{1F3FB}-\u{1F3FF}]/gu, '');
+const isEmojiG = (g) => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(g);
+/** "🤦🏻‍♀️Itni akal…" or "🍕 text" -> { emoji, text }  (space after the emoji is optional) */
+function splitLead(raw) {
+  const str = String(raw || '').trim();
+  const seg = typeof Intl !== 'undefined' && Intl.Segmenter ? [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(str)].map(x => x.segment) : Array.from(str);
+  let i = 0; while (i < seg.length && isEmojiG(seg[i]) && i < 4) i++;
+  return { emoji: seg.slice(0, i).join(''), text: seg.slice(i).join('').trim() };
+}
 const MAP = new Map(Object.entries(R).map(([k, v]) => [norm(k), v]));
 
 function custom(groupId) { try { return database.getGroupSettings(groupId).emojiRoastCustom || {}; } catch (_) { return {}; } }
-function isOn(groupId) { try { return database.getGroupSettings(groupId).emojiRoast !== false; } catch (_) { return true; } }
+function isOn(groupId) {
+  try {
+    // is bot ka apna switch (agar .emojifight / .emojiroast se set kiya ho) pehle, warna group wala
+    let id = 'default'; try { id = require('./botScope').id(); } catch (_) {}
+    const mine = database.getBotSetting(id, `emojiRoast_${groupId}`, null);
+    if (mine !== null) return mine !== false;
+    return database.getGroupSettings(groupId).emojiRoast !== false;
+  } catch (_) { return true; }
+}
 
 /** text of the roast for this exact message (only a single emoji / emoji sequence), or null */
 function replyFor(groupId, body, senderNum) {
   if (!isOn(groupId)) return null;
   const k = norm(body);
-  if (!k || k.length > 12) return null;
+  if (!k || k.length > 16) return null;
   const mine = custom(groupId)[k];
   const pool = (mine && mine.length ? mine : null) || MAP.get(k);
   if (!pool || !pool.length) return null;
   return pool[Math.floor(Math.random() * pool.length)].replace(/\{n\}/g, '@' + senderNum);
 }
 
-module.exports = { replyFor, isOn, norm, count: () => MAP.size, custom };
+module.exports = { replyFor, isOn, norm, splitLead, count: () => MAP.size, custom };
