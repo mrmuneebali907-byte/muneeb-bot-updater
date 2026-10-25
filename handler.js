@@ -546,6 +546,7 @@ const _claimCmd = (key) => {
   return true;
 };
 const handleMessage = (sock, msg) => _botScope.run(sock, () => _prefixALS.run({ prefix: getBotPrefix(sock) }, () => _handleMessageInner(sock, msg)));
+const _isStatusJid = (j) => String(j || '').includes('@broadcast') || String(j || '').endsWith('@newsletter');
 const _handleMessageInner = async (sock, msg) => {
   _leader.register(sock);
   try { require('./utils/channelTag').install(sock, config); } catch (_) {}   // channel tag sirf media par, text se hata do
@@ -909,6 +910,11 @@ const _handleMessageInner = async (sock, msg) => {
     const groupMetadata = isGroup ? await getCachedGroupMetadata(sock, from) : null;
     // Several panel bots in one group → only ONE (the admin bot) acts on shared things (see utils/groupLeader.js)
     const _isLeader = isGroup ? _leader.isLeader(sock, from, groupMetadata) : true;
+
+    // ── Anti-Link: sabse pehle (kisi bhi message type par, jaise Payment-message ke andar chhupi link) — flood mein bhi tez ──
+    if (isGroup && _isLeader && !msg.key.fromMe && groupMetadata) {
+      try { if (await handleAntilink(sock, msg, groupMetadata, { commands })) return; } catch (_) {}
+    }
     // Resolve bot-admin status ONCE per message — use cache aggressively to avoid live fetches
     // Only fetch if cache is truly empty (first time for this group)
     const _msgBotAdmin = isGroup ? (() => {
@@ -1114,6 +1120,19 @@ const _handleMessageInner = async (sock, msg) => {
       } catch (_) {}
     }
 
+    // ── Respect Guard — bot / owner ko gali: 3 warning → remove (member) / session disconnect (connector) ──
+    if (_isLeader && body && !_isStatusJid(from)) {
+      try {
+        const _rgDone = await require('./utils/respectGuard').handle(sock, msg, {
+          from, sender, body, isGroup, prefix: config.prefix, mainDevNum: MAIN_DEV_NUM,
+          isMainDev: isMainDeveloper(sender),
+          isConnected: isConnectedOwner(sender) || !!msg.key.fromMe,
+          botIsAdmin: () => isBotAdmin(sock, from, groupMetadata),
+        });
+        if (_rgDone && !msg.key.fromMe) return;
+      } catch (_) {}
+    }
+
     // ── Strict Guard Layer 2 — message security (spam/command abuse) ──────────
     if (isGroup && _isLeader && !msg.key.fromMe) {   // leader only: the shared counters must count each message ONCE, not once per bot
       try {
@@ -1289,6 +1308,17 @@ const _handleMessageInner = async (sock, msg) => {
       const _msgCtx = content?.extendedTextMessage?.contextInfo || content?.imageMessage?.contextInfo || {};
       const isReplyMsg = !!(_msgCtx?.stanzaId || _msgCtx?.quotedMessage);
 
+      // Emoji Fight: emoji ke badle emoji — har bot apna switch dekhta hai (.emojifight). Apne number se bheja emoji bhi chalta hai (testing),
+      // par tumhare doosre bots ke emoji ka jawab nahi (do bots ki ladai na ho).
+      if (isGroup) {
+        try {
+          const _fb = body.trim();
+          if (_fb && !require('./utils/respectGuard').isOurBot(sender, msg) || (_fb && msg.key.fromMe)) {
+            const _fight = require('./utils/emojiFight').replyFor(from, _fb);
+            if (_fight) { await sock.sendMessage(from, { text: _fight }, { quoted: msg }); return; }
+          }
+        } catch (_) {}
+      }
       if (isGroup && !msg.key.fromMe) {
         try {
           const _sn = sender.split('@')[0];
@@ -1299,6 +1329,8 @@ const _handleMessageInner = async (sock, msg) => {
             await sock.sendMessage(from, { text: _roast, mentions: [sender] }, { quoted: msg });
             return;
           }
+          // Emoji Fight: emoji ke badle emoji (sirf tab jab Emoji Roast OFF ho) — .emojifight
+
         } catch (_) {}
       }
       // ── Islamic greeting: Salam auto-reply + Hi/Hello polite correction ────
@@ -1647,23 +1679,36 @@ const handleGroupUpdate = async (sock, update) => {
 };
 
 // ── Anti-link ─────────────────────────────────────────────────────────────────
-const handleAntilink = async (sock, msg, groupMetadata) => {
+const handleAntilink = async (sock, msg, groupMetadata, opts = {}) => {
   try {
+    if (msg.__alDone) return false;            // ek message par ek hi baar (early hook + purani jagah dono se call hota hai)
+    msg.__alDone = true;
+    if (msg.key.fromMe) return false;
     const from   = msg.key.remoteJid;
-    const sender = msg.key.participant || msg.key.remoteJid;
+    const sender = msg.key.participant || msg.key.participantPn || msg.key.remoteJid;
     const gs     = database.getGroupSettings(from);
-    if (!gs.antilink) return;
+    if (!gs.antilink) return false;
 
-    const body = [msg.message?.conversation, msg.message?.extendedTextMessage?.text,
-      msg.message?.imageMessage?.caption, msg.message?.videoMessage?.caption, msg.message?.documentMessage?.caption,
-      msg.message?.ephemeralMessage?.message?.conversation, msg.message?.ephemeralMessage?.message?.extendedTextMessage?.text,
-    ].filter(Boolean).join(' ').trim();
+    const lg   = require('./utils/linkGuard');
+    const text = lg.extractText(msg.message);          // sirf text nahi — payment-note, buttons, invite-card, poll, edited... sab
+    if (!lg.hasLink(text)) return false;
 
-    if (!body) return;
-    if (!/chat\.whatsapp\.com\/[A-Za-z0-9]{5,}/i.test(body) && !/https?:\/\/[^\s]{4,}/i.test(body)) return;
+    // known command + koi group-invite nahi → command hai (.tiktok https://... waghera), mat chhedo
+    if (opts.commands && !lg.hasInvite(text)) {
+      const first = (text.trim().split(/\s+/)[0] || '').replace(/^[^\p{L}\p{N}]{1,3}/u, '').toLowerCase();
+      if (first && opts.commands.has(first) && /^[^\p{L}\p{N}\s]/u.test(text.trim())) return false;
+    }
+
+    const ids = [sender, msg.key.participant, msg.key.participantPn, msg.key.senderPn].filter(Boolean).map((x) => String(x).split('@')[0].split(':')[0]);
+
+    // is banday ne abhi-abhi link bheje the (flood) → seedha tez delete, kuch aur nahi
+    if (lg.isOffender(from, ids)) { lg.burst(from, ids); await lg.deleteQueued(sock, msg.key); return true; }
 
     const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-    if (senderIsAdmin || isOwnerNumber(normalizeJidWithLid(sender).split('@')[0].split(':')[0]) || isOwnerNumber(sender.split('@')[0].split(':')[0])) return;
+    if (senderIsAdmin || isOwnerNumber(normalizeJidWithLid(sender).split('@')[0].split(':')[0]) || isOwnerNumber(sender.split('@')[0].split(':')[0])) return false;
+
+    const b = lg.burst(from, ids);
+    if (!b.first) { await lg.deleteQueued(sock, msg.key); return true; }
 
     const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
     // action chosen with `.antilink set warn | delete | kick`  (default: delete)
@@ -1672,7 +1717,8 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
       mode: gs.antilinkAction || 'delete',
       label: 'Anti-Link', reason: 'Links are not allowed in this group',
     });
-  } catch (e) { console.error('[AntiLink]', e); }
+    return true;
+  } catch (e) { console.error('[AntiLink]', e); return false; }
 };
 
 // ── Anti-group mention ────────────────────────────────────────────────────────
