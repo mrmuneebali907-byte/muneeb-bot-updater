@@ -85,15 +85,13 @@ async function buildInner(sock, content) {
 
 /** Wrap the already-uploaded inner message for one group and relay it. */
 async function postToGroup(sock, jid, inner) {
-  const secret = crypto.randomBytes(32);
-  const wrapped = generateWAMessageFromContent(jid, {
-    messageContextInfo: { messageSecret: secret },
-    groupStatusMessageV2: { message: { ...inner, messageContextInfo: { messageSecret: secret } } },
-  }, {});
-  // tell antiGroupMention this id is our own post (never punish it)
-  try { (global.__agsIds = global.__agsIds || new Set()).add(wrapped.key.id); setTimeout(() => global.__agsIds.delete(wrapped.key.id), 10 * 60 * 1000).unref?.(); } catch (_) {}
-  await sock.relayMessage(jid, wrapped.message, { messageId: wrapped.key.id });
+  // Group Status = groupStatusMessageV2 + contextInfo.isGroupStatus + <meta is_group_status="true"/> (utils/groupStatusSend.js)
+  await require('../../utils/groupStatusSend').relayGroupStatus(sock, jid, inner, {
+    // tell antiGroupMention this id is our own post (never punish it)
+    onId: (id) => { (global.__agsIds = global.__agsIds || new Set()).add(id); setTimeout(() => global.__agsIds.delete(id), 10 * 60 * 1000).unref?.(); },
+  });
 }
+
 
 async function execute(sock, msg, args, extra) {
   const chatId = msg.key.remoteJid;
