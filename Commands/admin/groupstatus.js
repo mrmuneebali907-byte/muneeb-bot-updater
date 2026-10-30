@@ -47,6 +47,32 @@ module.exports = {
         return extra.reply('👥 This command can only be used in groups.');
       }
 
+      // .groupstatus check | patch | unpatch
+      if (/^(check|debug|info|patch|unpatch)$/i.test(String(args[0] || ''))) {
+        const gs  = require('../../utils/groupStatusSend');
+        const sub = String(args[0]).toLowerCase();
+        const senderId = msg.key.participant || msg.key.remoteJid;
+        const isOwnerUser = require('../lib/isOwner')(senderId) || require('../lib/perm').isPrivileged(sock, msg, extra);
+        if ((sub === 'patch' || sub === 'unpatch') && !isOwnerUser) return extra.reply('🔒 Ye sirf bot owner kar sakta hai.');
+        if (sub === 'patch') {
+          try { const r = gs.applyPatch(); return extra.reply(r.ok ? (r.already ? '✅ Patch pehle se laga hai.' : '✅ Patch laga diya (media group status ke liye mediatype).\n\n🔁 *Bot Restart karo*, tabhi asar hoga.') : `⚠️ ${r.why}`); }
+          catch (e) { return extra.reply('❌ Patch nahi lag saka: ' + e.message); }
+        }
+        if (sub === 'unpatch') { try { return extra.reply(gs.revertPatch() ? '✅ Patch hata diya. Bot Restart karo.' : 'ℹ️ Backup nahi mila, patch laga hi nahi tha.'); } catch (e) { return extra.reply('❌ ' + e.message); } }
+        let bv = '?'; try { bv = require('@whiskeysockets/baileys/package.json').version; } catch (_) {}
+        let sh = 'ok'; try { require('sharp'); } catch (e) { sh = 'FAILED'; }
+        const me = String(sock.user?.id || '').split('@')[0].split(':')[0];
+        return extra.reply(
+          `🔎 *GROUP STATUS CHECK*\n\n` +
+          `Bot number: *${me}*\n` +
+          `Baileys: *${bv}*\n` +
+          `Meta node (is_group_status): *${gs.libAddsMeta() ? 'lib khud lagata hai' : 'bot lagata hai'}*\n` +
+          `mediatype fix: *automatic (bot khud lagata hai)*  | lib patch: *${gs.patchState()}*\n` +
+          `sharp: *${sh}*\n` +
+          `Bot admin: *${extra.isBotAdmin ? 'haan' : 'nahi'}*\n\n` +
+          `Test: pehle text, phir image par reply karke *.groupstatus*. 30 second baad console me *[groupstatus] 🧾 30s report* dekho.`);
+      }
+
       const caption = (args.join(' ') || '').trim();
 
       const own = unwrap(msg.message);
@@ -244,25 +270,11 @@ async function groupStatus(sock, jid, content) {
   let thumb = 'n/a';
   try { thumb = await mediaFix.fixImageInner(inside, imgBuf); } catch (e) { thumb = 'error ' + e.message; }
 
-  const secret = crypto.randomBytes(32);
-
-  const msg = generateWAMessageFromContent(
-    jid,
-    {
-      messageContextInfo: { messageSecret: secret },
-      groupStatusMessageV2: {
-        message: {
-          ...inside,
-          messageContextInfo: { messageSecret: secret },
-        },
-      },
-    },
-    {}
-  );
-
-  await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+  // Group Status = groupStatusMessageV2 + contextInfo.isGroupStatus + <meta is_group_status="true"/> (utils/groupStatusSend.js)
+  const sent = await require('../../utils/groupStatusSend').relayGroupStatus(sock, jid, inside);
+  const msg  = sent.msg;
   watchAck(sock, msg.key.id, _notify, jid);
-  console.log(`[groupstatus] relayed kind=${Object.keys(inside).find((k) => !/context/i.test(k)) || '?'} thumb=${thumb} group=${String(jid).split('@')[0]}`);
+  console.log(`[groupstatus] relayed kind=${sent.kind} meta=${sent.meta} thumb=${thumb} group=${String(jid).split('@')[0]}`);
   return msg;
 }
 
